@@ -308,6 +308,10 @@ If you prefer to re-index data directly in an existing collection without creati
 - Use the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/documents.html#index-multiple-documents`">Bulk Import API</RouterLink> with `action=upsert` to update existing records and insert new ones.
 - To remove documents that no longer exist in your primary database, store a `last_synced_at` timestamp or batch identifier on each document and remove stale records using the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/documents.html#delete-by-query`">Delete by Query</RouterLink> endpoint (e.g. `filter_by:=last_synced_at:<1700000000`).
 
+:::tip Note on naming
+Collection names and alias names share the same namespace in Typesense and cannot have the same name. Always name your physical collections with a version/date suffix (e.g. `products_v1`) so your alias can use the clean, canonical name (e.g. `products`).
+:::
+
 ## Tips when importing data
 
 Here are some tips when importing data in batches into Typesense:
