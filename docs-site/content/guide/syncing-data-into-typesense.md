@@ -146,8 +146,171 @@ sinks:
 
 In addition to the above strategies, you could also do a re-index of your entire dataset on say a nightly basis, just to make sure any gaps in the synced data due to schema validation errors, network issues, failed retries etc are addressed and filled.
 
-You could use the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/collection-alias.html`">Collection Alias</RouterLink> feature to do a reindex into a new collection and then switch the alias over to the new collection.
-Or you can use the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/documents.html#index-multiple-documents`">Bulk Import API</RouterLink> with `action=upsert`, along with the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/documents.html#delete-by-query`">Delete by Query</RouterLink> endpoint on an existing collection and reimport your existing dataset.
+### Zero-downtime re-indexing with Collection Aliases
+
+The recommended approach for full re-indexing without search downtime is to use <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/collection-alias.html`">Collection Aliases</RouterLink>.
+
+An alias is a virtual pointer (similar to a symlink in Linux) that maps a friendly name to an actual collection. By configuring your frontend and backend applications to always query the alias (e.g. `products`) instead of hardcoding a physical collection name, you can switch the underlying index atomically at any time with zero search downtime.
+
+#### Initial Setup: Pointing an Alias to your Collection
+
+When first creating your search index:
+
+1. Create your initial collection with a versioned or timestamped name (e.g. `products_v1`).
+2. Create an alias (e.g. `products`) pointing to `products_v1`.
+3. In your application code and search UI, send all search queries and indexing requests to the alias name `products`.
+
+#### Zero-Downtime Re-indexing Workflow
+
+When you need to re-index your entire dataset (e.g. for nightly syncs, schema migrations, or bulk reprocessing):
+
+1. **Create a new collection**: Create a new collection with a timestamped or versioned name (e.g. `products_2026_08_15` or `products_v2`):
+
+   ```bash
+   curl "http://localhost:8108/collections" -X POST \
+     -H "Content-Type: application/json" \
+     -H "X-TYPESENSE-API-KEY: ${TYPESENSE_API_KEY}" \
+     -d '{
+       "name": "products_2026_08_15",
+       "fields": [
+         {"name": "name", "type": "string"},
+         {"name": "price", "type": "float"},
+         {"name": "category", "type": "string", "facet": true}
+       ]
+     }'
+   ```
+
+2. **Bulk import data into the new collection**: Stream your dataset into `products_2026_08_15` using the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/documents.html#index-multiple-documents`">Bulk Import API</RouterLink> (`action=upsert` or `action=create`).
+
+3. **Switch the alias to the new collection**: Update the `products` alias to point to `products_2026_08_15`. Once updated, all subsequent search queries and writes referencing `products` are immediately routed to the new collection:
+
+<Tabs :tabs="['JavaScript','PHP','Python','Ruby','Dart','Java','Go','Swift','Shell']">
+  <template v-slot:JavaScript>
+
+```js
+const aliasedCollection = {
+  'collection_name': 'products_2026_08_15'
+}
+
+// Points the `products` alias to the new `products_2026_08_15` collection
+await client.aliases().upsert('products', aliasedCollection)
+```
+
+  </template>
+  <template v-slot:PHP>
+
+```php
+$aliasedCollection = [
+  'collection_name' => 'products_2026_08_15'
+];
+
+# Points the `products` alias to the new `products_2026_08_15` collection
+$client->aliases->upsert('products', $aliasedCollection);
+```
+
+  </template>
+  <template v-slot:Python>
+
+```py
+aliased_collection = {
+  'collection_name': 'products_2026_08_15'
+}
+
+# Points the `products` alias to the new `products_2026_08_15` collection
+client.aliases.upsert('products', aliased_collection)
+```
+
+  </template>
+  <template v-slot:Ruby>
+
+```rb
+aliased_collection = {
+  'collection_name' => 'products_2026_08_15'
+}
+
+# Points the `products` alias to the new `products_2026_08_15` collection
+client.aliases.upsert('products', aliased_collection)
+```
+
+  </template>
+  <template v-slot:Dart>
+
+```dart
+final aliasedCollection = {
+  'collection_name': 'products_2026_08_15'
+};
+
+// Points the `products` alias to the new `products_2026_08_15` collection
+await client.aliases.upsert('products', aliasedCollection);
+```
+
+  </template>
+  <template v-slot:Java>
+
+```java
+CollectionAliasSchema collectionAlias = new CollectionAliasSchema();
+collectionAlias.collectionName("products_2026_08_15");
+
+// Points the `products` alias to the new `products_2026_08_15` collection
+client.aliases().upsert("products", collectionAlias);
+```
+
+  </template>
+  <template v-slot:Go>
+
+```go
+aliasedCollection := &api.CollectionAliasSchema{
+  CollectionName: "products_2026_08_15",
+}
+
+// Points the `products` alias to the new `products_2026_08_15` collection
+client.Aliases().Upsert(context.Background(), "products", aliasedCollection)
+```
+
+  </template>
+  <template v-slot:Swift>
+
+```swift
+let collection = CollectionAliasSchema(collectionName: "products_2026_08_15")
+
+// Points the `products` alias to the new `products_2026_08_15` collection
+let (collectionAlias, response) = try await client.aliases().upsert(name: "products", collection: collection)
+```
+
+  </template>
+  <template v-slot:Shell>
+
+```bash
+curl "http://localhost:8108/aliases/products" -X PUT \
+    -H "Content-Type: application/json" \
+    -H "X-TYPESENSE-API-KEY: ${TYPESENSE_API_KEY}" \
+    -d '{
+        "collection_name": "products_2026_08_15"
+    }'
+```
+
+  </template>
+</Tabs>
+
+4. **Drop the old collection (optional)**: After confirming that the new collection is functioning properly, delete the previous collection (e.g. `products_2026_08_14` or `products_v1`) to free up memory and disk space:
+
+   ```bash
+   curl "http://localhost:8108/collections/products_2026_08_14" -X DELETE \
+     -H "X-TYPESENSE-API-KEY: ${TYPESENSE_API_KEY}"
+   ```
+
+For additional operations like retrieving or deleting aliases, check the dedicated <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/collection-alias.html`">Collection Alias API reference</RouterLink>.
+
+### In-place re-indexing
+
+If you prefer to re-index data directly in an existing collection without creating a new one:
+
+- Use the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/documents.html#index-multiple-documents`">Bulk Import API</RouterLink> with `action=upsert` to update existing records and insert new ones.
+- To remove documents that no longer exist in your primary database, store a `last_synced_at` timestamp or batch identifier on each document and remove stale records using the <RouterLink :to="`/${$site.themeConfig.typesenseLatestVersion}/api/documents.html#delete-by-query`">Delete by Query</RouterLink> endpoint (e.g. `filter_by:=last_synced_at:<1700000000`).
+
+:::tip Note on naming
+Collection names and alias names share the same namespace in Typesense and cannot have the same name. Always name your physical collections with a version/date suffix (e.g. `products_v1`) so your alias can use the clean, canonical name (e.g. `products`).
+:::
 
 ## Tips when importing data
 
